@@ -1,6 +1,6 @@
 {
     "manifest_version": 3,
-    "name": "Gmail Verification Code Autofill",
+    "name": "2FacTrac",
     "version": "0.1",
     "description": "Automatically finds 6-digit verification codes from recent Gmail emails.",
     "permissions": [

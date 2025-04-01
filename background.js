@@ -283,12 +283,27 @@ chrome.action.onClicked.addListener((tab) => {
 // ADD listener for messages from Popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log("Background received message:", message);
-    if (message.type === 'getLatestCode') {
+    
+    if (message.type === 'triggerFetchAndGetCode') {
+        console.log("Trigger received. Running fresh email check...");
+        // Run the check and handle response asynchronously
+        findLatestVerificationCode().then(result => {
+            console.log("Fresh check completed, sending response:", 
+                      { code: latestVerificationCode, sender: latestSender });
+            // Respond with the latest code and sender
+            sendResponse({ code: latestVerificationCode, sender: latestSender });
+        }).catch(error => {
+            console.error("Error during fresh check:", error);
+            sendResponse({ code: latestVerificationCode, sender: latestSender });
+        });
+        
+        // Return true to indicate we'll respond asynchronously
+        return true;
+    }
+    else if (message.type === 'getLatestCode') {
+        // Keep the existing handler for backward compatibility
         console.log("Responding to getLatestCode with:", latestVerificationCode, "and sender:", latestSender);
         sendResponse({ code: latestVerificationCode, sender: latestSender });
-        // Note: Keep the listener asynchronous by returning true if you might
-        // call sendResponse asynchronously later (not needed here, but good practice)
-        // return true;
     }
     // Handle other message types if needed
 });

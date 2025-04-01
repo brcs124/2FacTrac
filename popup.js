@@ -10,11 +10,11 @@ function displayCode(code, sender) {
     if (code) {
         codeDisplay.textContent = code;
         copyButton.disabled = false;
-        statusDiv.textContent = 'Code found recently.';
+        statusDiv.textContent = 'Code found.';
         
         // Display sender information if available
         if (sender) {
-            senderInfo.textContent = `Sent from ${sender}`;
+            senderInfo.textContent = `From: ${sender}`;
             senderInfo.style.display = 'block';
         } else {
             senderInfo.style.display = 'none';
@@ -22,26 +22,26 @@ function displayCode(code, sender) {
     } else {
         codeDisplay.textContent = 'N/A';
         copyButton.disabled = true;
-        statusDiv.textContent = 'No code found recently or still checking.';
+        statusDiv.textContent = 'No code found or still checking.';
         senderInfo.style.display = 'none';
     }
 }
 
 // --- Request Code on Popup Open ---
-console.log("Popup requesting latest code from background.");
-statusDiv.textContent = 'Requesting code...';
-chrome.runtime.sendMessage({ type: "getLatestCode" }, (response) => {
+console.log("Popup requesting fresh code check from background.");
+statusDiv.textContent = 'Requesting check...';
+chrome.runtime.sendMessage({ type: "triggerFetchAndGetCode" }, (response) => {
     if (chrome.runtime.lastError) {
         console.error("Error getting code:", chrome.runtime.lastError);
-        displayCode(null); // Display N/A on error
+        displayCode(null, null);
         statusDiv.textContent = `Error: ${chrome.runtime.lastError.message}`;
     } else if (response) {
-        console.log("Popup received code:", response.code);
-        displayCode(response.code, response.sender); // Display the received code and sender (or null)
+        console.log("Popup received response:", response);
+        displayCode(response.code, response.sender);
     } else {
         console.log("Popup received empty response from background.");
-        displayCode(null);
-         statusDiv.textContent = 'Background script might be inactive or no code available.';
+        displayCode(null, null);
+        statusDiv.textContent = 'Background script might be inactive or no code available.';
     }
 });
 
@@ -59,7 +59,7 @@ copyButton.addEventListener('click', () => {
                     copyButton.textContent = 'Copy';
                     // Reset status message after a bit longer
                     setTimeout(() => {
-                        statusDiv.textContent = 'Code found recently.';
+                        statusDiv.textContent = 'Code found.';
                     }, 500);
                 }, 1500);
             })
