@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Verification Code</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            width: 250px; /* Adjust width as needed */
+            padding: 10px;
+            text-align: center;
+        }
+        #code-display {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin: 15px 0;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+            min-height: 30px; /* Ensure space even when no code */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        button {
+            padding: 8px 15px;
+            cursor: pointer;
+        }
+        #status {
+            font-size: 0.9em;
+            color: #555;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h3>Last Verification Code:</h3>
+    <div id="code-display">Loading...</div>
+    <button id="copy-button" disabled>Copy</button>
+    <div id="status"></div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

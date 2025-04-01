@@ -1,0 +1,26 @@
+{
+    "manifest_version": 3,
+    "name": "Gmail Verification Code Autofill",
+    "version": "0.1",
+    "description": "Automatically finds 6-digit verification codes from recent Gmail emails.",
+    "permissions": [
+      "identity",
+      "alarms"
+    ],
+    "host_permissions": [
+      "https://www.googleapis.com/*"
+    ],
+    "background": {
+      "service_worker": "background.js"
+    },
+    "action": {
+      "default_title": "Show Verification Code",
+      "default_popup": "popup.html"
+    },
+    "oauth2": {
+      "client_id": "166651681707-e7hsvegiet7enbll5diphdjrv2s0243u.apps.googleusercontent.com", 
+      "scopes": [
+        "https://www.googleapis.com/auth/gmail.readonly"
+      ]
+    }
+  }
