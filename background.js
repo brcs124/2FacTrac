@@ -1,8 +1,10 @@
 // background.js
 
-// --- Global Variable ---
+// --- Global Variables ---
 let latestVerificationCode = null;
 let latestSender = null;
+let latestVerificationLink = null;
+let currentTabDomain = null;
 
 // Function to get the OAuth 2.0 token
 function getAuthToken(interactive) {
@@ -172,13 +174,347 @@ function removeCachedAuthToken(token) {
     });
 }
 
-// --- Offscreen Document Logic (If needed later, currently removed) ---
-// async function hasOffscreenDocument(path) { ... }
-// async function copyCodeToClipboard(code) { ... }
+// Function to extract verification links from an email that match a given domain
+function findVerificationLink(emailData, targetDomain) {
+  if (!targetDomain) {
+    console.log("No target domain provided for link matching");
+    return null;
+  }
+
+  console.log(`Looking for links related to domain: "${targetDomain}"`);
+  
+  let bodyData = '';
+  const payload = emailData.payload;
+
+  // Get both HTML and plain text content when available
+  let htmlBody = '';
+  let textBody = '';
+  
+  // Extract email content
+  if (payload.parts) {
+    // Process multipart email
+    for (const part of payload.parts) {
+      if (part.mimeType === 'text/html' && part.body && part.body.data) {
+        htmlBody = atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+      } else if (part.mimeType === 'text/plain' && part.body && part.body.data) {
+        textBody = atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+      }
+      
+      // Handle nested multipart messages
+      if (part.parts) {
+        for (const nestedPart of part.parts) {
+          if (nestedPart.mimeType === 'text/html' && nestedPart.body && nestedPart.body.data) {
+            htmlBody += atob(nestedPart.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+          } else if (nestedPart.mimeType === 'text/plain' && nestedPart.body && nestedPart.body.data) {
+            textBody += atob(nestedPart.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+          }
+        }
+      }
+    }
+  } else if (payload.body && payload.body.data) {
+    // Process single part email
+    const data = atob(payload.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+    if (payload.mimeType === 'text/html') {
+      htmlBody = data;
+    } else {
+      textBody = data;
+    }
+  }
+  
+  // Prefer HTML for links, fallback to text
+  bodyData = htmlBody || textBody || emailData.snippet || '';
+  
+  console.log(`Email body length: ${bodyData.length} characters`);
+  
+  // Common verification link keywords
+  const verificationKeywords = [
+    'verify', 'verification', 'confirm', 'confirmation', 'activate', 'validation',
+    'account', 'sign-in', 'login', 'sign in', 'signin', 'log in', 
+    'authenticate', 'email', 'click here', 'link', 'authorize', 'approve'
+  ];
+  
+  // Strong verification patterns in the URL path or parameters
+  const strongVerificationPatterns = [
+    /\/verify/, /\/verification/, /\/confirm/, /\/validate/, /\/activate/,
+    /token=/, /code=/, /key=/, /confirm_email/, /email-verification/,
+    /verify-email/, /account-confirm/, /sign-in/, /login/, /auth/
+  ];
+
+  // Extract all URLs from the body
+  // More robust regex for URLs that handles special characters better
+  const urlRegex = /https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_+.~#?&//=]*)/gi;
+  let urls = bodyData.match(urlRegex) || [];
+  
+  // Special handling for HTML: extract href attributes which sometimes contain encoded URLs
+  if (htmlBody) {
+    const hrefRegex = /href=["']([^"']+)["']/gi;
+    let hrefMatch;
+    while ((hrefMatch = hrefRegex.exec(htmlBody)) !== null) {
+      if (hrefMatch[1].startsWith('http')) {
+        urls.push(hrefMatch[1]);
+      }
+    }
+  }
+  
+  // Remove duplicates
+  urls = [...new Set(urls)];
+  
+  console.log(`Found ${urls.length} unique URLs in the email`);
+  
+  // Group all found URLs by priority
+  const domainExactMatches = [];
+  const domainContainsMatches = [];
+  const verificationIndicatorMatches = [];
+  const otherUrls = [];
+  
+  for (const url of urls) {
+    try {
+      const urlObj = new URL(url);
+      const urlBaseDomain = extractBaseDomain(url);
+      
+      // Classify this URL
+      if (urlBaseDomain === targetDomain) {
+        // Exact domain match
+        console.log(`Exact domain match: ${url}`);
+        domainExactMatches.push(url);
+      } else if (urlObj.hostname.includes(targetDomain)) {
+        // Contains domain match (like auth.example.com)
+        console.log(`Contains domain: ${url}`);
+        domainContainsMatches.push(url);
+      } else {
+        // Check for verification indicators in other domains
+        let hasVerificationIndicator = false;
+        
+        // Check URL for verification patterns
+        for (const pattern of strongVerificationPatterns) {
+          if (pattern.test(url)) {
+            console.log(`URL with verification pattern: ${url} (pattern: ${pattern})`);
+            hasVerificationIndicator = true;
+            break;
+          }
+        }
+        
+        // Check for verification keywords
+        if (!hasVerificationIndicator) {
+          const lowerUrl = url.toLowerCase();
+          for (const keyword of verificationKeywords) {
+            if (lowerUrl.includes(keyword.toLowerCase())) {
+              console.log(`URL with verification keyword: ${url} (keyword: ${keyword})`);
+              hasVerificationIndicator = true;
+              break;
+            }
+          }
+        }
+        
+        if (hasVerificationIndicator) {
+          verificationIndicatorMatches.push(url);
+        } else {
+          otherUrls.push(url);
+        }
+      }
+    } catch (e) {
+      console.error(`Invalid URL: ${url}`, e);
+      // Skip invalid URLs
+    }
+  }
+  
+  // Search for surrounding text to find verification links
+  // This helps identify which links are verification links based on the text around them
+  const surroundingTextMatches = [];
+  
+  // Process HTML by finding link text
+  if (htmlBody) {
+    const anchorTagRegex = /<a\s+(?:[^>]*?\s+)?href=["']([^"']*)["'][^>]*>(.*?)<\/a>/gi;
+    let anchorMatch;
+    while ((anchorMatch = anchorTagRegex.exec(htmlBody)) !== null) {
+      const linkUrl = anchorMatch[1];
+      const linkText = anchorMatch[2].replace(/<[^>]*>/g, '').trim(); // Strip any nested HTML tags
+      
+      // Check if the link text has verification keywords
+      const lowerLinkText = linkText.toLowerCase();
+      for (const keyword of verificationKeywords) {
+        if (lowerLinkText.includes(keyword.toLowerCase())) {
+          console.log(`Found link with verification text: "${linkText}" -> ${linkUrl}`);
+          surroundingTextMatches.push(linkUrl);
+          break;
+        }
+      }
+    }
+  }
+  
+  // Search for verification context in text content
+  if (textBody) {
+    // Find lines that contain both a URL and verification keywords
+    const lines = textBody.split('\n');
+    for (const line of lines) {
+      // Skip very long lines (likely not meaningful context)
+      if (line.length > 300) continue;
+      
+      const lowerLine = line.toLowerCase();
+      let containsVerificationKeyword = false;
+      
+      for (const keyword of verificationKeywords) {
+        if (lowerLine.includes(keyword.toLowerCase())) {
+          containsVerificationKeyword = true;
+          break;
+        }
+      }
+      
+      if (containsVerificationKeyword) {
+        // Check if this line also contains a URL
+        const urlsInLine = line.match(urlRegex);
+        if (urlsInLine) {
+          for (const url of urlsInLine) {
+            console.log(`Found URL in verification context: ${url}`);
+            surroundingTextMatches.push(url);
+          }
+        }
+      }
+    }
+  }
+  
+  // Prioritize URLs
+  
+  // 1. First priority: Exact domain match + verification indicator
+  const exactMatchWithVerification = domainExactMatches.filter(url => {
+    // Check if URL is in surroundingTextMatches
+    if (surroundingTextMatches.includes(url)) return true;
+    
+    // Check for verification patterns
+    for (const pattern of strongVerificationPatterns) {
+      if (pattern.test(url)) return true;
+    }
+    
+    // Check for verification keywords
+    const lowerUrl = url.toLowerCase();
+    return verificationKeywords.some(kw => lowerUrl.includes(kw.toLowerCase()));
+  });
+  
+  if (exactMatchWithVerification.length > 0) {
+    console.log(`FOUND: Exact domain match with verification indicators: ${exactMatchWithVerification[0]}`);
+    return exactMatchWithVerification[0];
+  }
+  
+  // 2. Second priority: Contains domain + verification indicator
+  const containsMatchWithVerification = domainContainsMatches.filter(url => {
+    // Check if URL is in surroundingTextMatches
+    if (surroundingTextMatches.includes(url)) return true;
+    
+    // Check for verification patterns
+    for (const pattern of strongVerificationPatterns) {
+      if (pattern.test(url)) return true;
+    }
+    
+    // Check for verification keywords
+    const lowerUrl = url.toLowerCase();
+    return verificationKeywords.some(kw => lowerUrl.includes(kw.toLowerCase()));
+  });
+  
+  if (containsMatchWithVerification.length > 0) {
+    console.log(`FOUND: Domain-containing match with verification indicators: ${containsMatchWithVerification[0]}`);
+    return containsMatchWithVerification[0];
+  }
+  
+  // 3. Third priority: Any exact domain match
+  if (domainExactMatches.length > 0) {
+    console.log(`FOUND: Exact domain match without verification indicators: ${domainExactMatches[0]}`);
+    return domainExactMatches[0];
+  }
+  
+  // 4. Fourth priority: Any contains domain match
+  if (domainContainsMatches.length > 0) {
+    console.log(`FOUND: Domain-containing match without verification indicators: ${domainContainsMatches[0]}`);
+    return domainContainsMatches[0];
+  }
+  
+  // 5. Fifth priority: Any verification indicator match
+  if (verificationIndicatorMatches.length > 0) {
+    console.log(`FOUND: Non-domain match with verification indicators: ${verificationIndicatorMatches[0]}`);
+    return verificationIndicatorMatches[0];
+  }
+  
+  // 6. Sixth priority: Any link with verification context
+  const remainingContextMatches = surroundingTextMatches.filter(
+    url => !domainExactMatches.includes(url) && 
+           !domainContainsMatches.includes(url) && 
+           !verificationIndicatorMatches.includes(url)
+  );
+  
+  if (remainingContextMatches.length > 0) {
+    console.log(`FOUND: Link with verification context: ${remainingContextMatches[0]}`);
+    return remainingContextMatches[0];
+  }
+  
+  // No suitable verification links found
+  console.log(`No suitable verification links found for domain "${targetDomain}"`);
+  return null;
+}
+
+// Function to extract the base domain from a URL
+function extractBaseDomain(url) {
+  try {
+    const urlObj = new URL(url);
+    // Get the hostname (e.g., "www.example.com")
+    let hostname = urlObj.hostname;
+    
+    // Extract the base domain (typically the last two parts, e.g., "example.com")
+    const parts = hostname.split('.');
+    if (parts.length > 2) {
+      // Handle domains like "www.example.co.uk" or "sub.example.com"
+      // For well-known TLDs like .co.uk, .com.au, we want to keep the last 3 parts
+      const lastPart = parts[parts.length - 1];
+      const secondLastPart = parts[parts.length - 2];
+      
+      if ((secondLastPart === 'co' || secondLastPart === 'com' || 
+           secondLastPart === 'org' || secondLastPart === 'net' || 
+           secondLastPart === 'gov' || secondLastPart === 'edu') && 
+          lastPart.length <= 3) {
+        // This looks like a country code TLD with a second level domain
+        return `${parts[parts.length - 3]}.${secondLastPart}.${lastPart}`;
+      } else {
+        // Regular domain with subdomain(s)
+        return `${secondLastPart}.${lastPart}`;
+      }
+    }
+    
+    return hostname; // Return as is if it's already a base domain
+  } catch (e) {
+    console.error("Error extracting base domain:", e);
+    return null;
+  }
+}
+
+// Function to get the current tab's URL
+async function getCurrentTabURL() {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs && tabs.length > 0 && tabs[0].url) {
+        const url = tabs[0].url;
+        console.log(`Current tab URL: ${url}`);
+        const baseDomain = extractBaseDomain(url);
+        console.log(`Extracted base domain: ${baseDomain}`);
+        resolve(baseDomain);
+      } else {
+        console.log("No active tab found or URL is undefined");
+        resolve(null);
+      }
+    });
+  });
+}
 
 // Main function to orchestrate the process
 async function findLatestVerificationCode() {
   console.log('findLatestVerificationCode triggered');
+  
+  // First, try to get the current tab's domain
+  try {
+    currentTabDomain = await getCurrentTabURL();
+    console.log(`Current tab domain for verification link matching: ${currentTabDomain}`);
+  } catch (error) {
+    console.error("Error getting current tab URL:", error);
+    currentTabDomain = null;
+  }
+  
   let token;
   try {
     token = await getAuthToken(false);
@@ -202,27 +538,74 @@ async function findLatestVerificationCode() {
 
     if (messages.length === 0) {
       console.log("No recent emails found matching the criteria.");
-      // Clear the code if no recent emails are found
-      // latestVerificationCode = null; 
-      // Maybe don't clear it here, keep the last known good one?
       return null;
     }
 
-    let codeFoundInThisRun = null;
-    let senderFoundInThisRun = null;
+    console.log(`Processing ${messages.length} recent emails for verification information...`);
     
+    // We'll store the results from each email
+    const emailResults = [];
+    
+    // Process each email to find codes and links
     for (const message of messages) {
       console.log(`Checking message ID: ${message.id}`);
       try {
           const emailData = await getEmailContent(token, message.id);
+          const senderName = getSenderName(emailData);
+          
+          // For each email, check for both code and link
+          const result = {
+            messageId: message.id,
+            sender: senderName,
+            code: null,
+            link: null,
+            linkType: null, // Track the type of link for better prioritization
+            timestamp: new Date().getTime() // For recency ordering
+          };
+          
+          // Always look for a verification code
           const code = findVerificationCode(emailData);
           if (code) {
-            console.log(`SUCCESS: Found verification code: ${code}`);
-            codeFoundInThisRun = code; // Store locally first
-            senderFoundInThisRun = getSenderName(emailData);
-            console.log(`Sender: ${senderFoundInThisRun}`);
-            break; // Stop checking once we find the newest code
+            console.log(`Found verification code: ${code} in message ${message.id}`);
+            result.code = code;
           }
+          
+          // Always look for a verification link if we have a domain
+          if (currentTabDomain) {
+            const link = findVerificationLink(emailData, currentTabDomain);
+            if (link) {
+              console.log(`Found verification link: ${link} in message ${message.id}`);
+              result.link = link;
+              
+              // Classify the link type
+              try {
+                const urlBaseDomain = extractBaseDomain(link);
+                if (urlBaseDomain === currentTabDomain) {
+                  result.linkType = 'exact_domain';
+                  console.log(`Link is exact domain match: ${link}`);
+                } else if (new URL(link).hostname.includes(currentTabDomain)) {
+                  result.linkType = 'contains_domain';
+                  console.log(`Link contains domain: ${link}`);
+                } else {
+                  // CHANGE: Don't use links from other domains
+                  result.linkType = 'other_domain';
+                  console.log(`Link is from another domain (will be ignored): ${link}`);
+                  result.link = null; // Clear the link since it doesn't match our domain
+                }
+              } catch (e) {
+                result.linkType = 'other_domain';
+                console.error(`Error classifying link: ${link}`, e);
+                result.link = null; // Clear the link due to error
+              }
+            }
+          }
+          
+          // Only add this email to results if we found either a code or link
+          if (result.code || result.link) {
+            console.log(`Storing verification info from message ${message.id} - Code: ${result.code}, Link: ${result.link}`);
+            emailResults.push(result);
+          }
+          
       } catch (contentError) {
           console.error(`Skipping message ${message.id} due to error:`, contentError);
           if (contentError.message.includes("Authorization failed")) {
@@ -231,19 +614,89 @@ async function findLatestVerificationCode() {
           }
       }
     }
-
-    if (codeFoundInThisRun) {
-        console.log(`Storing latest code: ${codeFoundInThisRun} from sender: ${senderFoundInThisRun}`);
-        latestVerificationCode = codeFoundInThisRun;
-        latestSender = senderFoundInThisRun;
-        // Optional: Call clipboard function if using offscreen doc later
-        // await copyCodeToClipboard(latestVerificationCode);
-        return { code: latestVerificationCode, sender: latestSender };
+    
+    // After processing all emails, find the best result to use
+    if (emailResults.length > 0) {
+      console.log(`Found ${emailResults.length} emails with verification information`);
+      
+      // Sort results by priority:
+      // 1. Emails with both code and link
+      // 2. Emails with just a code
+      // 3. Emails with just a link
+      // Within each category, prefer more recent emails
+      emailResults.sort((a, b) => {
+        // First priority: Has both code and link
+        const aHasBoth = a.code && a.link;
+        const bHasBoth = b.code && b.link;
+        if (aHasBoth && !bHasBoth) return -1;
+        if (!aHasBoth && bHasBoth) return 1;
+        
+        // Second priority: Has code
+        const aHasCode = Boolean(a.code);
+        const bHasCode = Boolean(b.code);
+        if (aHasCode && !bHasCode) return -1;
+        if (!aHasCode && bHasCode) return 1;
+        
+        // Third priority: More recent message
+        return b.timestamp - a.timestamp;
+      });
+      
+      // Use the best match
+      const bestMatch = emailResults[0];
+      console.log(`Using best match from message ${bestMatch.messageId}`);
+      
+      // If our best match has a code but no link, find the best link from other emails
+      if (bestMatch.code && !bestMatch.link) {
+        console.log("Best match has a code but no link. Looking for a good link in other emails...");
+        
+        // Find emails with links - CHANGE: Filter for ONLY domain-matching links
+        const emailsWithLinks = emailResults.filter(result => 
+          result.link && (result.linkType === 'exact_domain' || result.linkType === 'contains_domain')
+        );
+        
+        if (emailsWithLinks.length > 0) {
+          console.log(`Found ${emailsWithLinks.length} emails with domain-matching links for potential fallback`);
+          
+          // Sort links by priority:
+          // 1. Exact domain matches first
+          // 2. Contains domain matches second
+          // 3. More recent within each category
+          emailsWithLinks.sort((a, b) => {
+            // First priority: Exact domain match
+            const aExactDomain = a.linkType === 'exact_domain';
+            const bExactDomain = b.linkType === 'exact_domain';
+            if (aExactDomain && !bExactDomain) return -1;
+            if (!aExactDomain && bExactDomain) return 1;
+            
+            // Second priority: More recent
+            return b.timestamp - a.timestamp;
+          });
+          
+          // Get the best link after sorting
+          const bestLinkEmail = emailsWithLinks[0];
+          console.log(`Found best domain-matching link from message ${bestLinkEmail.messageId}: ${bestLinkEmail.link} (type: ${bestLinkEmail.linkType})`);
+          
+          // Use this link with our best match
+          bestMatch.link = bestLinkEmail.link;
+        } else {
+          console.log("No domain-matching links found in any email, will not include a link in the response");
+        }
+      }
+      
+      // Store the results in global variables
+      latestVerificationCode = bestMatch.code;
+      latestVerificationLink = bestMatch.link;
+      latestSender = bestMatch.sender;
+      
+      // Return the result
+      return {
+        code: latestVerificationCode,
+        link: latestVerificationLink,
+        sender: latestSender
+      };
     } else {
-        console.log("Checked recent emails, no new 4-7 digit code found in this run.");
-        // Decide if we should clear latestVerificationCode here
-        // latestVerificationCode = null; // Option: Clear if no code found *now*
-        return null;
+      console.log("No verification information found in any recent emails.");
+      return null;
     }
 
   } catch (error) {
@@ -288,13 +741,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log("Trigger received. Running fresh email check...");
         // Run the check and handle response asynchronously
         findLatestVerificationCode().then(result => {
-            console.log("Fresh check completed, sending response:", 
-                      { code: latestVerificationCode, sender: latestSender });
-            // Respond with the latest code and sender
-            sendResponse({ code: latestVerificationCode, sender: latestSender });
+            console.log("Fresh check completed, sending response:", { 
+              code: latestVerificationCode, 
+              link: latestVerificationLink,
+              sender: latestSender 
+            });
+            // Respond with all latest verification info
+            sendResponse({ 
+              code: latestVerificationCode, 
+              link: latestVerificationLink,
+              sender: latestSender 
+            });
         }).catch(error => {
             console.error("Error during fresh check:", error);
-            sendResponse({ code: latestVerificationCode, sender: latestSender });
+            sendResponse({ 
+              code: latestVerificationCode, 
+              link: latestVerificationLink,
+              sender: latestSender 
+            });
         });
         
         // Return true to indicate we'll respond asynchronously
@@ -302,8 +766,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     else if (message.type === 'getLatestCode') {
         // Keep the existing handler for backward compatibility
-        console.log("Responding to getLatestCode with:", latestVerificationCode, "and sender:", latestSender);
-        sendResponse({ code: latestVerificationCode, sender: latestSender });
+        console.log("Responding to getLatestCode with:",
+            { code: latestVerificationCode, link: latestVerificationLink, sender: latestSender });
+        sendResponse({ 
+          code: latestVerificationCode, 
+          link: latestVerificationLink,
+          sender: latestSender 
+        });
     }
     // Handle other message types if needed
 });

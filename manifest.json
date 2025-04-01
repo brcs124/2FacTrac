@@ -1,11 +1,12 @@
 {
     "manifest_version": 3,
     "name": "2FacTrac",
-    "version": "0.1",
-    "description": "Automatically finds 6-digit verification codes from recent Gmail emails.",
+    "version": "1.0",
+    "description": "Automatically finds verification codes and links from recent Gmail emails to simplify the authentication process.",
     "permissions": [
       "identity",
-      "alarms"
+      "alarms",
+      "tabs"
     ],
     "host_permissions": [
       "https://www.googleapis.com/*"
