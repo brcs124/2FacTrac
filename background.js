@@ -87,42 +87,52 @@ async function getEmailContent(token, messageId) {
   }
 }
 
-// Function to parse email body for a 6-digit code
-function findSixDigitCode(emailData) {
+// Function to parse email body for a 4-7 digit code
+function findVerificationCode(emailData) {
   let bodyData = '';
   const payload = emailData.payload;
 
   // Find the email body, preferring plain text
   if (payload.parts) {
-    // Multipart email, search for text/plain or text/html part
     const part = payload.parts.find(p => p.mimeType === 'text/plain') || payload.parts.find(p => p.mimeType === 'text/html');
     if (part && part.body && part.body.data) {
-      bodyData = atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/')); // Base64 decode
+      bodyData = atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/'));
     }
   } else if (payload.body && payload.body.data) {
-    // Single part email
-     bodyData = atob(payload.body.data.replace(/-/g, '+').replace(/_/g, '/')); // Base64 decode
+     bodyData = atob(payload.body.data.replace(/-/g, '+').replace(/_/g, '/'));
   }
 
   if (!bodyData) {
-      // If plain text not found, check the snippet as a last resort (less reliable)
       bodyData = emailData.snippet || '';
   }
 
 
-  // Regex to find a 6-digit code (might need refinement)
-  // Looks for 6 digits potentially surrounded by spaces, start/end of line, or common separators
-  // Avoids matching longer numbers by using lookarounds or word boundaries (\b)
-   //const codeRegex = /(?<!\d)\b(\d{6})\b(?!\d)/; // Looks for exactly 6 digits as a 'word'
-   const codeRegex = /(?:^|\s|code is:|is: |code:|:)(\d{6})(?:$|\s|\.|,)/i; // More context-aware
-   const match = bodyData.match(codeRegex);
+  // Regex to find a 4, 5, 6, or 7 digit code (might need refinement)
+  // Looks for 4-7 digits potentially preceded by common keywords/spaces
+  // and followed by non-digit characters or end of string.
+  // Using \b (word boundary) is often effective here to avoid matching parts of longer numbers.
+  const codeRegex = /(?:code is |is: |code: |verification code |\b)(\d{5,7})\b/i; 
+  const match = bodyData.match(codeRegex);
 
   if (match && match[1]) {
-    console.log(`Found code: ${match[1]} in message ID: ${emailData.id}`);
-    return match[1]; // Return the first captured group (the 6 digits)
+    console.log(`Found code (${match[1].length} digits): ${match[1]} in message ID: ${emailData.id}`);
+    return match[1]; // Return the captured digits
+  }
+  
+  // Fallback: Look for just 4-7 digits as a standalone number, less precise
+  const fallbackRegex = /\b(\d{5,7})\b/;
+  const fallbackMatch = bodyData.match(fallbackRegex);
+  if(fallbackMatch && fallbackMatch[1]){
+      // Avoid matching things that look like years in common ranges
+      const potentialCode = parseInt(fallbackMatch[1], 10);
+      if(potentialCode < 1900 || potentialCode > 2100) { 
+          console.log(`Found potential code (fallback - ${fallbackMatch[1].length} digits): ${fallbackMatch[1]} in message ID: ${emailData.id}`);
+          return fallbackMatch[1];
+      }
   }
 
-  // console.log(`No 6-digit code found in message ID: ${emailData.id}. Body analyzed:\n`, bodyData.substring(0, 500)); // Log part of the body for debugging
+
+  // console.log(`No 4-7 digit code found in message ID: ${emailData.id}. Body analyzed:\n`, bodyData.substring(0, 500));
   return null; // No code found
 }
 
@@ -139,7 +149,7 @@ function removeCachedAuthToken(token) {
 
 // Main function to orchestrate the process
 async function findLatestVerificationCode() {
-  console.log('findLatestVerificationCode triggered'); // Added log
+  console.log('findLatestVerificationCode triggered');
   let token;
   try {
     token = await getAuthToken(false);
@@ -174,7 +184,7 @@ async function findLatestVerificationCode() {
       console.log(`Checking message ID: ${message.id}`);
       try {
           const emailData = await getEmailContent(token, message.id);
-          const code = findSixDigitCode(emailData);
+          const code = findVerificationCode(emailData);
           if (code) {
             console.log(`SUCCESS: Found verification code: ${code}`);
             codeFoundInThisRun = code; // Store locally first
@@ -196,7 +206,7 @@ async function findLatestVerificationCode() {
         // await copyCodeToClipboard(latestVerificationCode);
         return latestVerificationCode;
     } else {
-        console.log("Checked recent emails, no new 6-digit code found in this run.");
+        console.log("Checked recent emails, no new 4-7 digit code found in this run.");
         // Decide if we should clear latestVerificationCode here
         // latestVerificationCode = null; // Option: Clear if no code found *now*
         return null;
@@ -238,9 +248,9 @@ chrome.action.onClicked.addListener((tab) => {
 
 // ADD listener for messages from Popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log("Background received message:", message); // Added log
+    console.log("Background received message:", message);
     if (message.type === 'getLatestCode') {
-        console.log("Responding to getLatestCode with:", latestVerificationCode); // Added log
+        console.log("Responding to getLatestCode with:", latestVerificationCode);
         sendResponse({ code: latestVerificationCode });
         // Note: Keep the listener asynchronous by returning true if you might
         // call sendResponse asynchronously later (not needed here, but good practice)
