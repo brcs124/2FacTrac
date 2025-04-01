@@ -2,6 +2,7 @@
 
 // --- Global Variable ---
 let latestVerificationCode = null;
+let latestSender = null;
 
 // Function to get the OAuth 2.0 token
 function getAuthToken(interactive) {
@@ -84,6 +85,34 @@ async function getEmailContent(token, messageId) {
   } catch (error) {
     console.error('Error fetching email content:', error);
     throw error;
+  }
+}
+
+// Function to get sender name from email
+function getSenderName(emailData) {
+  if (!emailData || !emailData.payload || !emailData.payload.headers) {
+    return null;
+  }
+
+  // Look for the 'From' header
+  const fromHeader = emailData.payload.headers.find(header => 
+    header.name.toLowerCase() === 'from'
+  );
+
+  if (!fromHeader || !fromHeader.value) {
+    return null;
+  }
+
+  // Extract the name from the "Name <email@example.com>" format
+  const fromValue = fromHeader.value;
+  const nameMatch = fromValue.match(/^([^<]+)<.*>$/);
+  
+  if (nameMatch && nameMatch[1]) {
+    // Return the name part, trimmed of whitespace
+    return nameMatch[1].trim();
+  } else {
+    // If no match (e.g., just an email address), return the whole value
+    return fromValue;
   }
 }
 
@@ -180,6 +209,8 @@ async function findLatestVerificationCode() {
     }
 
     let codeFoundInThisRun = null;
+    let senderFoundInThisRun = null;
+    
     for (const message of messages) {
       console.log(`Checking message ID: ${message.id}`);
       try {
@@ -188,6 +219,8 @@ async function findLatestVerificationCode() {
           if (code) {
             console.log(`SUCCESS: Found verification code: ${code}`);
             codeFoundInThisRun = code; // Store locally first
+            senderFoundInThisRun = getSenderName(emailData);
+            console.log(`Sender: ${senderFoundInThisRun}`);
             break; // Stop checking once we find the newest code
           }
       } catch (contentError) {
@@ -200,11 +233,12 @@ async function findLatestVerificationCode() {
     }
 
     if (codeFoundInThisRun) {
-        console.log(`Storing latest code: ${codeFoundInThisRun}`);
+        console.log(`Storing latest code: ${codeFoundInThisRun} from sender: ${senderFoundInThisRun}`);
         latestVerificationCode = codeFoundInThisRun;
+        latestSender = senderFoundInThisRun;
         // Optional: Call clipboard function if using offscreen doc later
         // await copyCodeToClipboard(latestVerificationCode);
-        return latestVerificationCode;
+        return { code: latestVerificationCode, sender: latestSender };
     } else {
         console.log("Checked recent emails, no new 4-7 digit code found in this run.");
         // Decide if we should clear latestVerificationCode here
@@ -250,8 +284,8 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log("Background received message:", message);
     if (message.type === 'getLatestCode') {
-        console.log("Responding to getLatestCode with:", latestVerificationCode);
-        sendResponse({ code: latestVerificationCode });
+        console.log("Responding to getLatestCode with:", latestVerificationCode, "and sender:", latestSender);
+        sendResponse({ code: latestVerificationCode, sender: latestSender });
         // Note: Keep the listener asynchronous by returning true if you might
         // call sendResponse asynchronously later (not needed here, but good practice)
         // return true;

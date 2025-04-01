@@ -30,6 +30,25 @@
             color: #555;
             margin-top: 10px;
         }
+        #sender-info {
+            font-size: 0.9em;
+            color: #555;
+            margin-top: 8px;
+        }
+        #credits {
+            font-size: 0.8em;
+            color: #777;
+            margin-top: 15px;
+            border-top: 1px solid #eee;
+            padding-top: 8px;
+        }
+        #credits a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+        #credits a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -37,6 +56,11 @@
     <div id="code-display">Loading...</div>
     <button id="copy-button" disabled>Copy</button>
     <div id="status"></div>
+    <div id="sender-info"></div>
+    
+    <div id="credits">
+        Created by <a href="https://www.linkedin.com/in/cooper-maxwell/" target="_blank">Max Cooper</a> and <a href="https://www.linkedin.com/in/calebkhyun/" target="_blank">Caleb Hyun</a>
+    </div>
 
     <script src="popup.js"></script>
 </body>

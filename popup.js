@@ -3,17 +3,27 @@
 const codeDisplay = document.getElementById('code-display');
 const copyButton = document.getElementById('copy-button');
 const statusDiv = document.getElementById('status');
+const senderInfo = document.getElementById('sender-info');
 
 // Function to display the code and update button state
-function displayCode(code) {
+function displayCode(code, sender) {
     if (code) {
         codeDisplay.textContent = code;
         copyButton.disabled = false;
         statusDiv.textContent = 'Code found recently.';
+        
+        // Display sender information if available
+        if (sender) {
+            senderInfo.textContent = `Sent from ${sender}`;
+            senderInfo.style.display = 'block';
+        } else {
+            senderInfo.style.display = 'none';
+        }
     } else {
         codeDisplay.textContent = 'N/A';
         copyButton.disabled = true;
         statusDiv.textContent = 'No code found recently or still checking.';
+        senderInfo.style.display = 'none';
     }
 }
 
@@ -27,7 +37,7 @@ chrome.runtime.sendMessage({ type: "getLatestCode" }, (response) => {
         statusDiv.textContent = `Error: ${chrome.runtime.lastError.message}`;
     } else if (response) {
         console.log("Popup received code:", response.code);
-        displayCode(response.code); // Display the received code (or null)
+        displayCode(response.code, response.sender); // Display the received code and sender (or null)
     } else {
         console.log("Popup received empty response from background.");
         displayCode(null);
@@ -48,7 +58,9 @@ copyButton.addEventListener('click', () => {
                 setTimeout(() => {
                     copyButton.textContent = 'Copy';
                     // Reset status message after a bit longer
-                    displayCode(codeToCopy); // Re-display original status
+                    setTimeout(() => {
+                        statusDiv.textContent = 'Code found recently.';
+                    }, 500);
                 }, 1500);
             })
             .catch(err => {
@@ -63,7 +75,7 @@ copyButton.addEventListener('click', () => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'newCodeFound' && message.code) {
         console.log("Popup received new code update:", message.code);
-        displayCode(message.code);
+        displayCode(message.code, message.sender);
         statusDiv.textContent = 'New code arrived!';
     }
 });
