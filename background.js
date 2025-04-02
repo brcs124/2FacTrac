@@ -138,11 +138,10 @@ function findVerificationCode(emailData) {
   }
 
 
-  // Regex to find a 4, 5, 6, or 7 digit code (might need refinement)
-  // Looks for 4-7 digits potentially preceded by common keywords/spaces
+  // Updated regex to find ONLY 6 or 7 digit codes
+  // Looks for 6-7 digits potentially preceded by common keywords/spaces
   // and followed by non-digit characters or end of string.
-  // Using \b (word boundary) is often effective here to avoid matching parts of longer numbers.
-  const codeRegex = /(?:code is |is: |code: |verification code |\b)(\d{5,7})\b/i; 
+  const codeRegex = /(?:code is |is: |code: |verification code |\b)(\d{6,7})\b/i; 
   const match = bodyData.match(codeRegex);
 
   if (match && match[1]) {
@@ -150,8 +149,8 @@ function findVerificationCode(emailData) {
     return match[1]; // Return the captured digits
   }
   
-  // Fallback: Look for just 4-7 digits as a standalone number, less precise
-  const fallbackRegex = /\b(\d{5,7})\b/;
+  // Fallback: Look for just 6-7 digits as a standalone number, less precise
+  const fallbackRegex = /\b(\d{6,7})\b/;
   const fallbackMatch = bodyData.match(fallbackRegex);
   if(fallbackMatch && fallbackMatch[1]){
       // Avoid matching things that look like years in common ranges
@@ -163,7 +162,7 @@ function findVerificationCode(emailData) {
   }
 
 
-  // console.log(`No 4-7 digit code found in message ID: ${emailData.id}. Body analyzed:\n`, bodyData.substring(0, 500));
+  // console.log(`No 6-7 digit code found in message ID: ${emailData.id}. Body analyzed:\n`, bodyData.substring(0, 500));
   return null; // No code found
 }
 

@@ -18,7 +18,7 @@
       "default_popup": "popup.html"
     },
     "oauth2": {
-      "client_id": "166651681707-e7hsvegiet7enbll5diphdjrv2s0243u.apps.googleusercontent.com", 
+      "client_id": "1031909642935-e9q5o55m5lrtb3mekerupaereu3ghjjn.apps.googleusercontent.com", 
       "scopes": [
         "https://www.googleapis.com/auth/gmail.readonly"
       ]

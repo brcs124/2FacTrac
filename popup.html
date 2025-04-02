@@ -8,11 +8,14 @@
             width: 300px; /* Slightly wider for links */
             padding: 10px;
             text-align: center;
+            position: relative;
         }
         .section {
-            margin-bottom: 15px;
-            padding-bottom: 15px;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
             border-bottom: 1px solid #eee;
+            border-radius: 8px;
+            overflow: hidden;
         }
         h3 {
             margin-bottom: 5px;
@@ -24,17 +27,25 @@
             margin: 10px 0;
             padding: 10px;
             background-color: #f0f0f0;
-            border-radius: 4px;
+            border-radius: 8px;
             min-height: 30px; /* Ensure space even when no code */
             display: flex;
             align-items: center;
             justify-content: center;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        #code-display:hover {
+            background-color: #e0e0e0;
+        }
+        #code-display:active {
+            background-color: #d0d0d0;
         }
         #link-container {
             margin: 10px 0;
             padding: 10px;
             background-color: #f0f0f0;
-            border-radius: 4px;
+            border-radius: 8px;
             text-align: left;
             word-break: break-all;
             display: none; /* Hide initially, show when link available */
@@ -52,21 +63,34 @@
             padding: 8px 15px;
             cursor: pointer;
             margin: 5px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            background-color: #f8f8f8;
+            transition: background-color 0.2s;
+            outline: none;
+        }
+        button:hover {
+            background-color: #e8e8e8;
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
         #status {
             font-size: 0.9em;
             color: #555;
             margin-top: 10px;
+            display: none; /* Hide status message */
         }
         #sender-info {
-            font-size: 0.9em;
+            font-size: 1.1em; /* Increased from 0.9em */
             color: #555;
             margin-top: 8px;
         }
         #credits {
             font-size: 0.8em;
             color: #777;
-            margin-top: 15px;
+            margin-top: 10px;
             padding-top: 8px;
         }
         #credits a {
@@ -80,16 +104,121 @@
             display: flex;
             justify-content: center;
         }
+        /* Toast message for copy confirmation */
+        #copy-toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        #copy-toast.show {
+            opacity: 1;
+        }
+        /* Header controls positioning */
+        .header-controls {
+            position: absolute;
+            width: 100%;
+            top: 10px;
+            left: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center; /* Center items vertically */
+            padding: 0 10px;
+            box-sizing: border-box;
+            pointer-events: none; /* Allow clicks to pass through to elements below */
+        }
+        /* Logo styles */
+        #logo {
+            width: 32px;  /* Increased from 32px (5% larger) */
+            height: 32px; /* Increased from 32px (5% larger) */
+            pointer-events: auto; /* Allow logo to be clickable */
+            border-radius: 6px; /* Add slight rounding to match the UI */
+            object-fit: contain; /* Ensure the logo maintains its aspect ratio */
+            vertical-align: middle; /* Align vertically */
+        }
+        /* Logo link container */
+        .logo-container {
+            display: flex;
+            align-items: center;
+            pointer-events: auto;
+        }
+        /* Refresh button styles */
+        #refresh-button {
+            position: static; /* Changed from absolute */
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background-color: #f8f8f8;
+            border: 1px solid #ccc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            padding: 0;
+            margin: 0;
+            transition: transform 0.3s, background-color 0.2s;
+            pointer-events: auto; /* Allow button to be clickable */
+        }
+        #refresh-button:hover {
+            background-color: #e8e8e8;
+        }
+        #refresh-button:active {
+            background-color: #d0d0d0;
+        }
+        #refresh-button.rotating {
+            animation: rotate 1s linear;
+        }
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        /* SVG icon color */
+        #refresh-button svg {
+            fill: #555;
+            width: 18px;
+            height: 18px;
+        }
+        /* Consistent spacing between sections */
+        #code-section {
+            margin-top: 35px; /* Make room for the header controls */
+            padding-bottom: 10px;
+        }
+        #link-section {
+            margin-top: 10px;
+            padding-top: 0px;
+            padding-bottom: 12px;
+        }
+        #open-link-button {
+            margin-bottom: 10px;
+        }
     </style>
 </head>
 <body>
-    <div class="section">
-        <h3>Last Verification Code:</h3>
-        <div id="code-display">Loading...</div>
-        <div class="buttons">
-            <button id="copy-button" disabled>Copy</button>
-            <button id="refresh-button">Refresh</button>
+    <!-- Header controls for logo and refresh button -->
+    <div class="header-controls">
+        <div class="logo-container">
+            <a href="https://2factrac.com" target="_blank" title="Visit 2FacTrac.com">
+                <img id="logo" src="icons/icon128.png" alt="2FacTrac Logo">
+            </a>
         </div>
+        <button id="refresh-button" title="Refresh">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 9.35h7V2.35l-2.35 4z"/>
+            </svg>
+        </button>
+    </div>
+
+    <div class="section" id="code-section">
+        <h3>Last Verification Code:</h3>
+        <div id="code-display" title="Click to copy">Loading...</div>
         <div id="status"></div>
         <div id="sender-info"></div>
     </div>
@@ -104,6 +233,9 @@
     <div id="credits">
         Created by <a href="https://www.linkedin.com/in/cooper-maxwell/" target="_blank">Max Cooper</a> and <a href="https://www.linkedin.com/in/calebkhyun/" target="_blank">Caleb Hyun</a>
     </div>
+
+    <!-- Toast message element -->
+    <div id="copy-toast">Copied!</div>
 
     <script src="popup.js"></script>
 </body>
