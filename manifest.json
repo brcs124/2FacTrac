@@ -5,7 +5,6 @@
     "description": "Automatically finds verification codes and links from recent Gmail emails to simplify the authentication process.",
     "permissions": [
       "identity",
-      "alarms",
       "tabs"
     ],
     "host_permissions": [
@@ -23,5 +22,10 @@
       "scopes": [
         "https://www.googleapis.com/auth/gmail.readonly"
       ]
+    },
+    "icons": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
     }
   }

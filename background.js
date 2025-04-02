@@ -560,7 +560,7 @@ async function findLatestVerificationCode() {
             code: null,
             link: null,
             linkType: null, // Track the type of link for better prioritization
-            timestamp: new Date().getTime() // For recency ordering
+            timestamp: emailData.internalDate ? parseInt(emailData.internalDate) : new Date().getTime() // Use actual email timestamp when available
           };
           
           // Always look for a verification code
@@ -587,7 +587,7 @@ async function findLatestVerificationCode() {
                   result.linkType = 'contains_domain';
                   console.log(`Link contains domain: ${link}`);
                 } else {
-                  // CHANGE: Don't use links from other domains
+                  // Don't use links from other domains
                   result.linkType = 'other_domain';
                   console.log(`Link is from another domain (will be ignored): ${link}`);
                   result.link = null; // Clear the link since it doesn't match our domain
@@ -602,7 +602,9 @@ async function findLatestVerificationCode() {
           
           // Only add this email to results if we found either a code or link
           if (result.code || result.link) {
-            console.log(`Storing verification info from message ${message.id} - Code: ${result.code}, Link: ${result.link}`);
+            // Log the timestamp for debugging
+            const date = new Date(result.timestamp);
+            console.log(`Storing verification info from message ${message.id} - Code: ${result.code}, Link: ${result.link}, Date: ${date.toISOString()}`);
             emailResults.push(result);
           }
           
@@ -619,74 +621,88 @@ async function findLatestVerificationCode() {
     if (emailResults.length > 0) {
       console.log(`Found ${emailResults.length} emails with verification information`);
       
-      // Sort results by priority:
-      // 1. Emails with both code and link
-      // 2. Emails with just a code
-      // 3. Emails with just a link
-      // Within each category, prefer more recent emails
-      emailResults.sort((a, b) => {
-        // First priority: Has both code and link
-        const aHasBoth = a.code && a.link;
-        const bHasBoth = b.code && b.link;
-        if (aHasBoth && !bHasBoth) return -1;
-        if (!aHasBoth && bHasBoth) return 1;
-        
-        // Second priority: Has code
-        const aHasCode = Boolean(a.code);
-        const bHasCode = Boolean(b.code);
-        if (aHasCode && !bHasCode) return -1;
-        if (!aHasCode && bHasCode) return 1;
-        
-        // Third priority: More recent message
-        return b.timestamp - a.timestamp;
-      });
+      // CHANGED PRIORITY:
+      // 1. Most recent email with a code
+      // 2. Then consider links (domain matches only)
       
-      // Use the best match
-      const bestMatch = emailResults[0];
-      console.log(`Using best match from message ${bestMatch.messageId}`);
+      // First, get the most recent email with a code
+      const emailsWithCodes = emailResults.filter(result => result.code);
       
-      // If our best match has a code but no link, find the best link from other emails
-      if (bestMatch.code && !bestMatch.link) {
-        console.log("Best match has a code but no link. Looking for a good link in other emails...");
+      if (emailsWithCodes.length > 0) {
+        // Sort by timestamp (most recent first)
+        emailsWithCodes.sort((a, b) => b.timestamp - a.timestamp);
         
-        // Find emails with links - CHANGE: Filter for ONLY domain-matching links
-        const emailsWithLinks = emailResults.filter(result => 
+        // Use the most recent email with a code
+        const bestMatch = emailsWithCodes[0];
+        console.log(`Using most recent email with code from message ${bestMatch.messageId} (timestamp: ${new Date(bestMatch.timestamp).toISOString()})`);
+        
+        // If it doesn't have a link, find the best link from domain-matching emails
+        if (!bestMatch.link) {
+          console.log("Most recent email with code has no link. Looking for a good link in other emails...");
+          
+          // Find emails with domain-matching links
+          const emailsWithLinks = emailResults.filter(result => 
+            result.link && (result.linkType === 'exact_domain' || result.linkType === 'contains_domain')
+          );
+          
+          if (emailsWithLinks.length > 0) {
+            console.log(`Found ${emailsWithLinks.length} emails with domain-matching links for potential fallback`);
+            
+            // Sort links by priority:
+            // 1. Exact domain matches first
+            // 2. Contains domain matches second
+            // 3. More recent within each category
+            emailsWithLinks.sort((a, b) => {
+              // First priority: Exact domain match
+              const aExactDomain = a.linkType === 'exact_domain';
+              const bExactDomain = b.linkType === 'exact_domain';
+              if (aExactDomain && !bExactDomain) return -1;
+              if (!aExactDomain && bExactDomain) return 1;
+              
+              // Second priority: More recent
+              return b.timestamp - a.timestamp;
+            });
+            
+            // Get the best link after sorting
+            const bestLinkEmail = emailsWithLinks[0];
+            console.log(`Found best domain-matching link from message ${bestLinkEmail.messageId}: ${bestLinkEmail.link} (type: ${bestLinkEmail.linkType})`);
+            
+            // Use this link with our best match
+            bestMatch.link = bestLinkEmail.link;
+          } else {
+            console.log("No domain-matching links found in any email, will not include a link in the response");
+          }
+        }
+        
+        // Store the results in global variables
+        latestVerificationCode = bestMatch.code;
+        latestVerificationLink = bestMatch.link;
+        latestSender = bestMatch.sender;
+      } 
+      else {
+        // No emails with codes, just use the most recent email with a domain-matching link
+        const emailsWithDomainLinks = emailResults.filter(result => 
           result.link && (result.linkType === 'exact_domain' || result.linkType === 'contains_domain')
         );
         
-        if (emailsWithLinks.length > 0) {
-          console.log(`Found ${emailsWithLinks.length} emails with domain-matching links for potential fallback`);
+        if (emailsWithDomainLinks.length > 0) {
+          // Sort by timestamp
+          emailsWithDomainLinks.sort((a, b) => b.timestamp - a.timestamp);
           
-          // Sort links by priority:
-          // 1. Exact domain matches first
-          // 2. Contains domain matches second
-          // 3. More recent within each category
-          emailsWithLinks.sort((a, b) => {
-            // First priority: Exact domain match
-            const aExactDomain = a.linkType === 'exact_domain';
-            const bExactDomain = b.linkType === 'exact_domain';
-            if (aExactDomain && !bExactDomain) return -1;
-            if (!aExactDomain && bExactDomain) return 1;
-            
-            // Second priority: More recent
-            return b.timestamp - a.timestamp;
-          });
+          const bestMatch = emailsWithDomainLinks[0];
+          console.log(`No codes found. Using most recent email with domain link from message ${bestMatch.messageId}`);
           
-          // Get the best link after sorting
-          const bestLinkEmail = emailsWithLinks[0];
-          console.log(`Found best domain-matching link from message ${bestLinkEmail.messageId}: ${bestLinkEmail.link} (type: ${bestLinkEmail.linkType})`);
-          
-          // Use this link with our best match
-          bestMatch.link = bestLinkEmail.link;
+          // Store the results in global variables
+          latestVerificationCode = null;
+          latestVerificationLink = bestMatch.link;
+          latestSender = bestMatch.sender;
         } else {
-          console.log("No domain-matching links found in any email, will not include a link in the response");
+          console.log("No emails with domain-matching links either. No verification info to return.");
+          latestVerificationCode = null;
+          latestVerificationLink = null;
+          latestSender = null;
         }
       }
-      
-      // Store the results in global variables
-      latestVerificationCode = bestMatch.code;
-      latestVerificationLink = bestMatch.link;
-      latestSender = bestMatch.sender;
       
       // Return the result
       return {
