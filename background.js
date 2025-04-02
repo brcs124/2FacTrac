@@ -118,52 +118,169 @@ function getSenderName(emailData) {
   }
 }
 
-// Function to parse email body for a 4-7 digit code
+// Function to parse email body for verification codes
 function findVerificationCode(emailData) {
   let bodyData = '';
+  let htmlBody = '';
   const payload = emailData.payload;
 
-  // Find the email body, preferring plain text
+  // Find the email body, getting both plain text for regex and HTML for element parsing
   if (payload.parts) {
-    const part = payload.parts.find(p => p.mimeType === 'text/plain') || payload.parts.find(p => p.mimeType === 'text/html');
-    if (part && part.body && part.body.data) {
-      bodyData = atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+    // Get both plain text and HTML content
+    const plainTextPart = payload.parts.find(p => p.mimeType === 'text/plain');
+    const htmlPart = payload.parts.find(p => p.mimeType === 'text/html');
+    
+    // Extract plain text content if available
+    if (plainTextPart && plainTextPart.body && plainTextPart.body.data) {
+      bodyData = atob(plainTextPart.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+    }
+    
+    // Extract HTML content if available
+    if (htmlPart && htmlPart.body && htmlPart.body.data) {
+      htmlBody = atob(htmlPart.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+      
+      // If no plain text, use HTML with tags removed as fallback for regex searches
+      if (!bodyData) {
+        bodyData = htmlBody.replace(/<[^>]*>/g, ' ');
+      }
     }
   } else if (payload.body && payload.body.data) {
-     bodyData = atob(payload.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+    const data = atob(payload.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+    
+    if (payload.mimeType === 'text/html') {
+      htmlBody = data;
+      bodyData = data.replace(/<[^>]*>/g, ' '); // Strip tags for regex search
+    } else {
+      bodyData = data;
+    }
   }
 
   if (!bodyData) {
-      bodyData = emailData.snippet || '';
+    bodyData = emailData.snippet || '';
   }
 
-
-  // Updated regex to find ONLY 6 or 7 digit codes
-  // Looks for 6-7 digits potentially preceded by common keywords/spaces
-  // and followed by non-digit characters or end of string.
+  // --- PART 1: Standard Numeric Code Detection (6-7 digits) ---
+  
+  // First check: Numeric codes with verification context
   const codeRegex = /(?:code is |is: |code: |verification code |\b)(\d{6,7})\b/i; 
   const match = bodyData.match(codeRegex);
 
   if (match && match[1]) {
-    console.log(`Found code (${match[1].length} digits): ${match[1]} in message ID: ${emailData.id}`);
+    console.log(`Found numeric code with context (${match[1].length} digits): ${match[1]} in message ID: ${emailData.id}`);
     return match[1]; // Return the captured digits
   }
   
-  // Fallback: Look for just 6-7 digits as a standalone number, less precise
+  // Second check: Standalone numeric codes (fallback for just numbers)
   const fallbackRegex = /\b(\d{6,7})\b/;
   const fallbackMatch = bodyData.match(fallbackRegex);
-  if(fallbackMatch && fallbackMatch[1]){
-      // Avoid matching things that look like years in common ranges
-      const potentialCode = parseInt(fallbackMatch[1], 10);
-      if(potentialCode < 1900 || potentialCode > 2100) { 
-          console.log(`Found potential code (fallback - ${fallbackMatch[1].length} digits): ${fallbackMatch[1]} in message ID: ${emailData.id}`);
-          return fallbackMatch[1];
-      }
+  if (fallbackMatch && fallbackMatch[1]) {
+    // Avoid matching things that look like years in common ranges
+    const potentialCode = parseInt(fallbackMatch[1], 10);
+    if (potentialCode < 1900 || potentialCode > 2100) { 
+      console.log(`Found standalone numeric code (${fallbackMatch[1].length} digits): ${fallbackMatch[1]} in message ID: ${emailData.id}`);
+      return fallbackMatch[1];
+    }
   }
 
+  // --- PART 2: Isolated Short Text in HTML Elements (New Approach) ---
+  if (htmlBody) {
+    // 1. Find content inside common HTML elements that is 4-7 characters long and appears alone
+    const elementTypes = ['div', 'td', 'tr', 'h[1-6]', 'p', 'span', 'strong', 'b', 'em', 'i', 'a', 'li'];
+    
+    // Create a dynamic regex pattern to match isolated content in various HTML elements
+    for (const element of elementTypes) {
+      // This pattern matches elements with only whitespace and the potential code
+      const elementRegex = new RegExp(`<${element}[^>]*>\\s*([\\w\\d\\-]{4,7})\\s*<\\/${element.replace('[1-6]', '\\d')}>`, 'gi');
+      
+      let elementMatch;
+      while ((elementMatch = elementRegex.exec(htmlBody)) !== null) {
+        const potentialCode = elementMatch[1].trim();
+        console.log(`Found isolated text in ${element}: "${potentialCode}"`);
+        
+        // Check if this looks like a verification code - for short isolated text, we use more lenient criteria
+        if (isShortIsolatedCode(potentialCode)) {
+          console.log(`Found short isolated code in ${element}: ${potentialCode}`);
+          return potentialCode;
+        }
+      }
+    }
+    
+    // 2. Look for elements with specific styling that indicates they're meant to stand out
+    // These often contain verification codes
+    const styledElementRegex = /<[^>]*style=['"][^'"]*(?:font-size|font-weight|color|background|text-align\s*:\s*center)[^'"]*['"][^>]*>([\s\n]*)([A-Z0-9\-]{4,7})([\s\n]*)</gi;
+    let styledMatch;
+    while ((styledMatch = styledElementRegex.exec(htmlBody)) !== null) {
+      const potentialCode = styledMatch[2].trim();
+      if (isShortIsolatedCode(potentialCode)) {
+        console.log(`Found styled short code: ${potentialCode}`);
+        return potentialCode;
+      }
+    }
+    
+    // 3. Look for content that appears visually separated (often in a table or with CSS styling)
+    // This is a more aggressive approach to find isolated content
+    const visuallySeparatedRegex = /(?:>|^)\s*([A-Z0-9\-]{4,7})\s*(?:<|$)/gi;
+    let separatedMatch;
+    while ((separatedMatch = visuallySeparatedRegex.exec(htmlBody)) !== null) {
+      const potentialCode = separatedMatch[1].trim();
+      if (isShortIsolatedCode(potentialCode)) {
+        console.log(`Found visually separated short code: ${potentialCode}`);
+        return potentialCode;
+      }
+    }
+  }
 
-  // console.log(`No 6-7 digit code found in message ID: ${emailData.id}. Body analyzed:\n`, bodyData.substring(0, 500));
-  return null; // No code found
+  // No verification code found
+  return null;
+}
+
+// Helper function specifically for short isolated codes (4-7 chars)
+function isShortIsolatedCode(str) {
+  // Clean up the string
+  str = str.trim();
+  
+  // Check basic length criteria (4-7 characters for isolated codes)
+  if (str.length < 4 || str.length > 7) {
+    return false;
+  }
+  
+  // Must have either:
+  // 1. At least one letter and one number for mixed alphanumeric codes
+  // 2. All digits for numeric codes (length-validated above)
+  const hasLetter = /[a-z]/i.test(str);
+  const hasNumber = /\d/.test(str);
+  const allDigits = /^\d+$/.test(str);
+  
+  if (allDigits && str.length >= 5) {
+    // Pure digit codes should be 5-7 digits
+    return true;
+  }
+  
+  if (hasLetter && hasNumber) {
+    // Mixed alphanumeric codes
+    return true;
+  }
+  
+  // Common formats for verification codes
+  if (/^[A-Z0-9]{2,4}-[A-Z0-9]{1,3}$/i.test(str)) {
+    // Formats like "FQP-UN3" or "A1-B2C"
+    return true;
+  }
+  
+  // Avoid common words and single words
+  const lowerStr = str.toLowerCase();
+  if (/^[a-z]+$/i.test(str)) {
+    // Avoid single words made up of only letters
+    return false;
+  }
+  
+  const commonWords = ['click', 'here', 'login', 'go', 'open', 'view', 'visit', 'see'];
+  if (commonWords.includes(lowerStr)) {
+    return false;
+  }
+  
+  // For short isolated content, if it contains a number, it's more likely a code
+  return hasNumber;
 }
 
 // Function to remove a cached token if it's invalid
