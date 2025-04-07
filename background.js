@@ -25,7 +25,7 @@ function getAuthToken(interactive) {
 async function fetchRecentEmails(token) {
   // Search for emails in the inbox, received in the last 5 minutes
   // You might want to refine the query, e.g., add 'is:unread' or keywords
-  const query = "in:inbox newer_than:5m";
+  const query = "in:inbox newer_than:1h (verification OR confirmation OR authentication OR code OR passcode OR verify OR secure OR login)";
   const url = `https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=5`; // Limit to 5 recent messages for efficiency
 
   try {
@@ -137,7 +137,10 @@ function findVerificationCode(emailData) {
     
     // Extract HTML content if available
     if (htmlPart && htmlPart.body && htmlPart.body.data) {
-      htmlBody = atob(htmlPart.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+      let rawHtml = atob(htmlPart.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+      
+      // Remove content within style tags before processing
+      htmlBody = removeStyleTagContents(rawHtml);
       
       // If no plain text, use HTML with tags removed as fallback for regex searches
       if (!bodyData) {
@@ -148,8 +151,9 @@ function findVerificationCode(emailData) {
     const data = atob(payload.body.data.replace(/-/g, '+').replace(/_/g, '/'));
     
     if (payload.mimeType === 'text/html') {
-      htmlBody = data;
-      bodyData = data.replace(/<[^>]*>/g, ' '); // Strip tags for regex search
+      // Remove content within style tags
+      htmlBody = removeStyleTagContents(data);
+      bodyData = htmlBody.replace(/<[^>]*>/g, ' '); // Strip tags for regex search
     } else {
       bodyData = data;
     }
@@ -311,16 +315,20 @@ function findVerificationLink(emailData, targetDomain) {
     // Process multipart email
     for (const part of payload.parts) {
       if (part.mimeType === 'text/html' && part.body && part.body.data) {
-        htmlBody = atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+        const rawHtml = atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+        // Remove content within style tags
+        htmlBody += removeStyleTagContents(rawHtml);
       } else if (part.mimeType === 'text/plain' && part.body && part.body.data) {
-        textBody = atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+        textBody += atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/'));
       }
       
       // Handle nested multipart messages
       if (part.parts) {
         for (const nestedPart of part.parts) {
           if (nestedPart.mimeType === 'text/html' && nestedPart.body && nestedPart.body.data) {
-            htmlBody += atob(nestedPart.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+            const rawHtml = atob(nestedPart.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+            // Remove content within style tags
+            htmlBody += removeStyleTagContents(rawHtml);
           } else if (nestedPart.mimeType === 'text/plain' && nestedPart.body && nestedPart.body.data) {
             textBody += atob(nestedPart.body.data.replace(/-/g, '+').replace(/_/g, '/'));
           }
@@ -331,7 +339,8 @@ function findVerificationLink(emailData, targetDomain) {
     // Process single part email
     const data = atob(payload.body.data.replace(/-/g, '+').replace(/_/g, '/'));
     if (payload.mimeType === 'text/html') {
-      htmlBody = data;
+      // Remove content within style tags
+      htmlBody = removeStyleTagContents(data);
     } else {
       textBody = data;
     }
@@ -835,6 +844,14 @@ async function findLatestVerificationCode() {
     console.error('Error in findLatestVerificationCode:', error);
     return null;
   }
+}
+
+// Helper function to remove content within style tags
+function removeStyleTagContents(html) {
+  if (!html) return '';
+  
+  // Remove content within <style> tags
+  return html.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
 }
 
 // --- Execution & Listeners ---
