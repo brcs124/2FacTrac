@@ -25,7 +25,7 @@ function getAuthToken(interactive) {
 async function fetchRecentEmails(token) {
   // Search for emails in the inbox, received in the last 5 minutes
   // You might want to refine the query, e.g., add 'is:unread' or keywords
-  const query = "in:inbox newer_than:1h (verification OR confirmation OR authentication OR code OR passcode OR verify OR secure OR login)";
+  const query = "in:inbox newer_than:1h subject:(verification OR confirmation OR authentication OR code OR passcode OR verify OR secure OR login)";
   const url = `https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=5`; // Limit to 5 recent messages for efficiency
 
   try {
