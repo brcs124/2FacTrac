@@ -392,7 +392,16 @@ function findVerificationLink(emailData, targetDomain) {
   const verificationIndicatorMatches = [];
   const otherUrls = [];
   
+  // Define regex for common image file extensions
+  const imageExtensionRegex = /\.(png|jpe?g|gif|webp|svg|bmp)$/i;
+
   for (const url of urls) {
+    // Check if the URL ends with an image extension
+    if (imageExtensionRegex.test(url)) {
+        console.log(`Skipping image URL: ${url}`);
+        continue; // Skip this URL
+    }
+
     try {
       const urlObj = new URL(url);
       const urlBaseDomain = extractBaseDomain(url);
